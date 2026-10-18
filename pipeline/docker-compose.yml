@@ -1,0 +1,30 @@
+name: kicad-pipeline
+
+services:
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    volumes:
+      - ..:/work
+    command: verify --project /work --out /work/reports
+
+  sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    volumes:
+      - ..:/work
+    # TODO: фаза 3 — глубокий прогон (corner/Monte Carlo)
+    command: verify --project /work --only spice --strict
+
+  ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    volumes:
+      - ..:/work
+    command: verify --project /work --format both
