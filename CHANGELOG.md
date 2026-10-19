@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `7452eb0` docs: README, CHANGELOG по фактическим хешам, .gitignore += .env
+- `17ff8d3` ci: пины зависимостей, кэш Docker, permissions: read, entrypoint
+- `a7dc3b5` test: pytest-набор на verify CLI (30 тестов)
+- `1893d1e` fix: замечания ревью — contract_invalid, ConfigError, DependencyError, escaping
 - `2192d79` ci: воркфлоу гейтов + deep-sim по лейблу
 - `23533e9` docs: README, CHANGELOG
 - `b53f25c` docs: библиотека блоков — формат и правила
