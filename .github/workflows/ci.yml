@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - 'feature/*'
+  pull_request:
+    branches:
+      - master
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    env:
+      HOME: /home/kicad
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build pipeline image
+        run: docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
+
+      - name: Test simple-divider (expect 0)
+        run: |
+          set +e
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/simple-divider --format both
+          EXIT_CODE=$?
+          set -e
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "simple-divider: expected 0, got $EXIT_CODE"
+            exit 1
+          fi
+
+      - name: Test missing-power (expect 1)
+        run: |
+          set +e
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/missing-power --format both
+          EXIT_CODE=$?
+          set -e
+          if [ "$EXIT_CODE" -ne 1 ]; then
+            echo "missing-power: expected 1, got $EXIT_CODE"
+            exit 1
+          fi
+
+      - name: Test no-bench (expect 0)
+        run: |
+          set +e
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/no-bench --format both
+          EXIT_CODE=$?
+          set -e
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "no-bench: expected 0, got $EXIT_CODE"
+            exit 1
+          fi
+
+      - name: Upload report summary
+        if: always()
+        run: |
+          if [ -f fixtures/simple-divider/reports/report.md ]; then
+            cat fixtures/simple-divider/reports/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "simple-divider report.md not found at fixtures/simple-divider/reports/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deep-sim:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'sim-deep')
+    env:
+      HOME: /home/kicad
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build pipeline image
+        run: docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
+
+      - name: Run deep simulation
+        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --only spice --strict --project /work/fixtures/simple-divider --format both
