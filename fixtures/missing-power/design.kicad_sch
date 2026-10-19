@@ -1,0 +1,41 @@
+(kicad_sch
+  (version 1)
+  (generator "eeschema")
+  (generator_version "10.0")
+  (uuid "00000000-0000-0000-0000-000000000201")
+  (paper "A4")
+  (title_block
+    (title "missing-power")
+  )
+  (lib_symbols
+    (symbol "power:GND" (power) (pin_names (offset 0)) (in_bom yes) (on_board yes)
+      (property "Reference" "#PWR" (at 0 -6.35 0) (effects (font (size 1.27 1.27)) hide))
+      (property "Value" "GND" (at 0 -3.81 0) (effects (font (size 1.27 1.27))))
+      (symbol "GND_0_1"
+        (polyline (pts (xy 0 0) (xy 0 -1.27)) (stroke (width 0) (type default)) (fill (type none)))
+        (polyline (pts (xy -1.27 -1.27) (xy 1.27 -1.27) (stroke (width 0.254) (type default)) (fill (type none))))
+        (polyline (pts (xy -0.635 -1.905) (xy 0.635 -1.905) (stroke (width 0.254) (type default)) (fill (type none)))))
+      (symbol "GND_1_1"
+        (pin power_in line (at 0 0 270) (effects (font (size 1.27 1.27)) (justify left)) (name "GND" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
+    )
+    (symbol "power:VCC" (power) (pin_names (offset 0)) (in_bom yes) (on_board yes)
+      (property "Reference" "#PWR" (at 0 -3.81 0) (effects (font (size 1.27 1.27)) hide))
+      (property "Value" "VCC" (at 0 3.81 0) (effects (font (size 1.27 1.27))))
+      (symbol "VCC_0_1"
+        (polyline (pts (xy -0.762 1.27) (xy 0 2.54)) (stroke (width 0) (type default)) (fill (type none)))
+        (polyline (pts (xy 0 0) (xy 0 2.54)) (stroke (width 0) (type default)) (fill (type none)))
+        (polyline (pts (xy 0 2.54) (xy 0.762 1.27)) (stroke (width 0) (type default)) (fill (type none))))
+      (symbol "VCC_1_1"
+        (pin power_in line (at 0 0 90) (effects (font (size 1.27 1.27)) (justify left)) (name "VCC" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
+    )
+  )
+  (wire (pts (xy 130 85) (xy 130 90)) (stroke (width 0) (type default)) (uuid "20120101-0000-0000-0000-000000000201"))
+  (symbol (lib_id "power:VCC") (at 130 85 0) (unit 1) (uuid "20120102-0000-0000-0000-000000000201")
+    (property "Reference" "#PWR201" (at 130 88.81 0) (effects (font (size 1.27 1.27)) hide))
+    (property "Value" "VCC" (at 130 81.28 0) (effects (font (size 1.27 1.27))))
+    (pin "1" (uuid "20120103-0000-0000-0000-000000000201")))
+  (symbol (lib_id "power:GND") (at 130 90 0) (unit 1) (uuid "20120104-0000-0000-0000-000000000201")
+    (property "Reference" "#PWR202" (at 130 96.35 0) (effects (font (size 1.27 1.27)) hide))
+    (property "Value" "GND" (at 130 93.98 0) (effects (font (size 1.27 1.27))))
+    (pin "1" (uuid "20120105-0000-0000-0000-000000000201")))
+)
