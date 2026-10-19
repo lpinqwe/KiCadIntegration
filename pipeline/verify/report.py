@@ -109,13 +109,13 @@ def _markdown_findings(findings: list[Finding]) -> list[str]:
 
 
 def _positions(items: list[dict]) -> str:
-    """Позиции элементов находки: 'ref@(x,y); ...'."""
+    """Позиции элементов находки: 'ref@(x,y); ...' (экранировано для таблицы)."""
     parts = []
     for item in items:
         pos = item.get("pos") or {}
         coord = f"({pos['x']},{pos['y']})" if "x" in pos and "y" in pos else ""
         label = item.get("description") or item.get("ref") or item.get("uuid") or "?"
-        parts.append(f"{label}{coord}")
+        parts.append(_escape(f"{label}{coord}"))
     return "; ".join(parts)
 
 

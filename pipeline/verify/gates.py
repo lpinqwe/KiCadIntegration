@@ -70,16 +70,26 @@ def _rel(path: Path, project_dir: Path) -> str:
 
 
 def _load_yaml_file(path: Path) -> Optional[dict[str, Any]]:
-    """Прочитать YAML-файл; ошибка парсинга → None (finding добавляет caller)."""
+    """Прочитать YAML-файл: файла нет → None; файл битый → ConfigError.
+
+    Различие важно для lib-check (hard-гейт): отсутствие block.yaml допустимо
+    (фолбэк на ports/index), но нечитабельный/битый файл — это contract_invalid.
+    """
     try:
         import yaml
     except ImportError as exc:  # pragma: no cover - зависит от окружения
         raise DependencyError("PyYAML не установлен (pip install PyYAML)") from exc
+    if not path.is_file():
+        return None
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return None
-    return data if isinstance(data, dict) else None
+    except OSError as exc:
+        raise ConfigError(f"не удалось прочитать {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"некорректный YAML в {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: ожидается mapping в корне")
+    return data
 
 
 # ---------------------------------------------------------------- gate 1: parse
@@ -203,7 +213,9 @@ def _collect_global_labels(gate: GateResult, sch_path: Path) -> Optional[set[str
     """Имена global label'ов схемы (порты подсхем по спеке §3.1)."""
     sch, error = _open_schematic(sch_path)
     if sch is None:
-        gate.add(SEV_WARNING, "labels_unavailable",
+        # lib-check — hard-гейт: непарсящаяся схема не может «пройти» ничего
+        # не проверив; finalize() переведёт статус в fail.
+        gate.add(SEV_ERROR, "labels_unavailable",
                  f"схема не парсится, порты не проверены: {error}")
         return None
     return {str(label.value) for label in sch.global_label}
@@ -237,13 +249,17 @@ def _load_contract(gate: GateResult, project_dir: Path, name: str,
         return None
     yaml_path = _block_yaml_path(project_dir, entry)
     if yaml_path is not None:
-        data = _load_yaml_file(yaml_path)
-        if data is not None:
-            try:
-                return BlockContract.from_yaml_dict(name, data)
-            except ConfigError as exc:
-                gate.add(SEV_ERROR, "contract_invalid", str(exc))
-                return None
+        try:
+            data = _load_yaml_file(yaml_path)
+        except ConfigError as exc:
+            # Файл есть, но битый/нечитабельный — hard-гейт, не фолбэк (§4).
+            gate.add(SEV_ERROR, "contract_invalid", str(exc))
+            return None
+        try:
+            return BlockContract.from_yaml_dict(name, data)
+        except ConfigError as exc:
+            gate.add(SEV_ERROR, "contract_invalid", str(exc))
+            return None
     ports = entry.get("ports")
     if isinstance(ports, dict):
         return BlockContract(name=name, ports=ports)
@@ -353,14 +369,27 @@ def _erc_items(viol: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _warn_simulation_model_issue(gate: GateResult, project_dir: Path) -> None:
-    """§4.2: simulation_model_issue=ignore в .kicad_pro → warning."""
+    """§4.2: simulation_model_issue по умолчанию IGNORE — гейт обязан предупреждать.
+
+    Warning эмитится, если ключ отсутствует ИЛИ не равен "error": иначе
+    «у компонента нет SPICE-модели» проглатывается ERC-ом и gate spice падает
+    без внятной причины.
+    """
     data = _load_kicad_pro(project_dir)
-    if data is None:
-        return
-    sev = data.get("erc", {}).get("rule_severities", {})
-    if isinstance(sev, dict) and str(sev.get("simulation_model_issue", "")).lower() == "ignore":
-        gate.add(SEV_WARNING, "simulation_model_issue_ignored",
-                 "simulation_model_issue отключён в ERC (ignore), см. спеку §4.2")
+    configured: Optional[str] = None
+    if data is not None:
+        sev = data.get("erc", {})
+        if isinstance(sev, dict):
+            sev = sev.get("rule_severities", {})
+            if isinstance(sev, dict):
+                raw = str(sev.get("simulation_model_issue", "")).lower()
+                configured = raw or None
+    if configured != "error":
+        shown = configured or "не задан (по умолчанию ignore)"
+        gate.add(SEV_WARNING, "simulation_model_issue_not_error",
+                 f"simulation_model_issue в ERC = {shown}; включите "
+                 f"erc.rule_severities.simulation_model_issue = \"error\" "
+                 f"(спека §4.2)")
 
 
 def _load_kicad_pro(project_dir: Path) -> Optional[dict[str, Any]]:
@@ -458,7 +487,13 @@ def gate_spice(sch_path: Path, out_dir: Path, project_dir: Path) -> GateResult:
         gate.add(SEV_WARNING, "no_testbench",
                  "bench/expect.yaml не найден — SPICE-проверка пропущена")
         return gate
-    expect = spice.load_expect(expect_path)
+    try:
+        expect = spice.load_expect(expect_path)
+    except ConfigError as exc:
+        # Битый expect.yaml — finding гейта, а не исключение наружу:
+        # прогон должен дойти до report.json.
+        gate.add(SEV_ERROR, "expect_invalid", str(exc))
+        return gate
     net_path = out_dir / "circuit.net"
     ok, message = spice.export_netlist(KICAD_CLI, sch_path, net_path)
     if not ok:
@@ -471,10 +506,20 @@ def gate_spice(sch_path: Path, out_dir: Path, project_dir: Path) -> GateResult:
     return gate
 
 
+def _ngspice_timeout_s() -> int:
+    """NGSPICE_TIMEOUT из окружения; битое/неположительное значение → дефолт."""
+    raw = os.environ.get("NGSPICE_TIMEOUT", "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_NGSPICE_TIMEOUT_S
+    return value if value > 0 else DEFAULT_NGSPICE_TIMEOUT_S
+
+
 def _simulate(gate: GateResult, net_path: Path,
               out_dir: Path) -> dict[str, float]:
     """Прогнать ngspice и вернуть .meas-значения из лога."""
-    timeout = int(os.environ.get("NGSPICE_TIMEOUT", DEFAULT_NGSPICE_TIMEOUT_S))
+    timeout = _ngspice_timeout_s()
     log_path = out_dir / "circuit.log"
     try:
         spice.run_ngspice(net_path, out_dir / "circuit.raw", log_path, timeout)

@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .schemas import Check, ConfigError, ExpectConfig
+from .schemas import Check, ConfigError, DependencyError, ExpectConfig
 
 # Имя файла ожиданий рядом со схемой: <sch_dir>/bench/expect.yaml
 EXPECT_FILENAME = Path("bench") / "expect.yaml"
@@ -78,7 +78,8 @@ def run_ngspice(net_path: Path, raw_path: Path, log_path: Path,
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout)
     except OSError as exc:
-        raise ConfigError(f"не удалось запустить ngspice: {exc}") from exc
+        # Отсутствие бинаря ngspice — exit 3 по контракту __main__.py.
+        raise DependencyError(f"не удалось запустить ngspice: {exc}") from exc
     return proc.returncode, (proc.stderr or "").strip()
 
 

@@ -132,7 +132,7 @@ class Check:
     kind: str  # value | inequality
     expected: float
     op: Optional[str] = None  # только для inequality: <=, <, >=, >, ==, !=
-    tol_abs: float = 0.0
+    tol_abs: float = 0.0  # для kind=value задаётся ЯВНО в expect.yaml (см. from_dict)
     unit: str = ""
     severity: str = SEVERITY_HARD
 
@@ -149,13 +149,32 @@ class Check:
         if kind == "inequality" and op not in ("<=", "<", ">=", ">", "==", "!="):
             raise ConfigError(f"check {data.get('name')!r}: "
                               f"недопустимый op {op!r} для inequality")
+        try:
+            expected = float(data["expected"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"check {data.get('name')!r}: expected должен быть числом, "
+                f"got {data['expected']!r}") from exc
+        tol_raw = data.get("tol_abs")
+        if kind == "value" and tol_raw is None:
+            # Без tol_abs check сводится к точному float-равенству — ловушка;
+            # требуем явный допуск (или kind=inequality).
+            raise ConfigError(
+                f"check {data.get('name')!r}: kind=value требует явного "
+                f"tol_abs (без него — точное float-равенство); задайте допуск")
+        try:
+            tol_abs = float(tol_raw) if tol_raw is not None else 0.0
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"check {data.get('name')!r}: tol_abs должен быть числом, "
+                f"got {tol_raw!r}") from exc
         return cls(
             name=str(data.get("name", "")),
             meas=str(data.get("meas", data.get("name", ""))),
             kind=kind,
-            expected=float(data["expected"]),
+            expected=expected,
             op=str(op) if op is not None else None,
-            tol_abs=float(data.get("tol_abs", 0.0)),
+            tol_abs=tol_abs,
             unit=str(data.get("unit", "")),
             severity=str(data.get("severity", SEVERITY_HARD)),
         )
@@ -195,10 +214,16 @@ class BlockContract:
         ports = data.get("ports") or {}
         if not isinstance(ports, dict):
             raise ConfigError(f"block.yaml {name!r}: ports должен быть mapping")
+        try:
+            version = int(data.get("version", 1))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"block.yaml {name!r}: version должен быть целым числом, "
+                f"got {data.get('version')!r}") from exc
         return cls(
             name=name,
             ports=ports,
-            version=int(data.get("version", 1)),
+            version=version,
             requires=list(data.get("requires") or []),
         )
 
