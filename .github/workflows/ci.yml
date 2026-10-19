@@ -21,8 +21,6 @@ permissions:
 jobs:
   gates:
     runs-on: ubuntu-latest
-    env:
-      HOME: /home/kicad
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,8 +83,6 @@ jobs:
   deep-sim:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'sim-deep')
-    env:
-      HOME: /home/kicad
     steps:
       - name: Checkout
         uses: actions/checkout@v4
