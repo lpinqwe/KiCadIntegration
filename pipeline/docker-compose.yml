@@ -6,25 +6,33 @@ services:
       context: .
       dockerfile: Dockerfile
     user: "1000:1000"
+    environment:
+      HOME: /home/kicad
     volumes:
       - ..:/work
-    command: verify --project /work --out /work/reports
+    # PROJECT — первый аргумент entrypoint'а; по умолчанию фикстура.
+    # Свой проект: docker compose run verify fixtures/missing-power
+    command: ["fixtures/simple-divider"]
 
   sim:
     build:
       context: .
       dockerfile: Dockerfile
     user: "1000:1000"
+    environment:
+      HOME: /home/kicad
     volumes:
       - ..:/work
     # TODO: фаза 3 — глубокий прогон (corner/Monte Carlo)
-    command: verify --project /work --only spice --strict
+    command: ["fixtures/simple-divider", "--only", "spice", "--strict"]
 
   ci:
     build:
       context: .
       dockerfile: Dockerfile
     user: "1000:1000"
+    environment:
+      HOME: /home/kicad
     volumes:
       - ..:/work
-    command: verify --project /work --format both
+    command: ["fixtures/simple-divider", "--format", "both"]

@@ -15,6 +15,9 @@ on:
       - labeled
       - unlabeled
 
+permissions:
+  contents: read
+
 jobs:
   gates:
     runs-on: ubuntu-latest
@@ -24,13 +27,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build pipeline image
-        run: docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
+        uses: docker/build-push-action@v6
+        with:
+          context: pipeline
+          file: pipeline/Dockerfile
+          tags: kicad-pipeline:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Test simple-divider (expect 0)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/simple-divider --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --format both
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -41,7 +54,7 @@ jobs:
       - name: Test missing-power (expect 1)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/missing-power --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/missing-power --format both
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 1 ]; then
@@ -52,7 +65,7 @@ jobs:
       - name: Test no-bench (expect 0)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --project /work/fixtures/no-bench --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/no-bench --format both
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -78,8 +91,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build pipeline image
-        run: docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
+        uses: docker/build-push-action@v6
+        with:
+          context: pipeline
+          file: pipeline/Dockerfile
+          tags: kicad-pipeline:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Run deep simulation
-        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline verify --only spice --strict --project /work/fixtures/simple-divider --format both
+        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --only spice --strict --format both
