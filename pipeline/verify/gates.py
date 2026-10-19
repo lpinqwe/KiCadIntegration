@@ -116,7 +116,7 @@ def _parse_with_skip(gate: GateResult, sch_path: Path) -> None:
 def _run_happy_analyzer(gate: GateResult, sch_path: Path, out_dir: Path) -> None:
     """Запустить analyze_schematic.py; сбой — warning, не fail (по заданию)."""
     root = Path(os.environ.get("HAPPY_ROOT", DEFAULT_HAPPY_ROOT))
-    script = root / "skills" / "kicad" / "analyze_schematic.py"
+    script = root / "skills" / "kicad" / "scripts" / "analyze_schematic.py"
     if not script.is_file():
         gate.add(SEV_WARNING, "analyzer_missing",
                  f"analyze_schematic.py не найден ({script}), анализ пропущен")
@@ -125,7 +125,8 @@ def _run_happy_analyzer(gate: GateResult, sch_path: Path, out_dir: Path) -> None
     try:
         proc = subprocess.run([python, str(script), str(sch_path)],
                               capture_output=True, text=True,
-                              timeout=ANALYZE_TIMEOUT_S)
+                              timeout=ANALYZE_TIMEOUT_S,
+                              cwd=str(out_dir))
     except (OSError, subprocess.TimeoutExpired) as exc:
         gate.add(SEV_WARNING, "analyzer_failed",
                  f"kicad-happy анализ не выполнился: {exc}")
@@ -475,10 +476,12 @@ def _mpn_fields_from_json(path: Path) -> set[str]:
 # ----------------------------------------------------------------- gate 5: spice
 
 def gate_spice(sch_path: Path, out_dir: Path, project_dir: Path) -> GateResult:
-    """Гейт 5 (hard): netlist → ngspice → .meas против expect.yaml (§4 #5).
+    """Гейт 5 (hard): netlist → тестбенч → ngspice → .meas против expect.yaml (§4 #5).
 
-    Нет bench/expect.yaml → status skip (НЕ fail). Exit code ngspice как
-    признак успеха не используется — только наличие строк .meas в логе.
+    Нет bench/expect.yaml → status skip (НЕ fail). bench/checks.spice вставляется
+    в netlist перед .end: именно он задаёт источники/анализ, а .meas — ожидания
+    expect.yaml. Exit code ngspice как признак успеха не используется —
+    только наличие строк .meas в логе.
     """
     gate = GateResult("spice")
     expect_path = spice.find_expect(sch_path)
@@ -499,11 +502,42 @@ def gate_spice(sch_path: Path, out_dir: Path, project_dir: Path) -> GateResult:
     if not ok:
         gate.add(SEV_ERROR, "netlist_export_failed", message)
         return gate
+    if not _inject_checks(gate, sch_path, net_path):
+        return gate
     values = _simulate(gate, net_path, out_dir)
     cases = _apply_checks(gate, expect.checks, values)
     _write_sim_report(out_dir, gate, cases)
     gate.artifact = _rel(out_dir / "sim.json", project_dir)
     return gate
+
+
+def _inject_checks(gate: GateResult, sch_path: Path, net_path: Path) -> bool:
+    """Вставить bench/checks.spice в netlist перед .end (§4.1).
+
+    Возвращает False, если продолжать нечем: нет checks.spice (warning) либо
+    файл нечитаем (error checks_inject_failed).
+    """
+    checks_path = spice.find_checks(sch_path)
+    if checks_path is None:
+        gate.add(SEV_WARNING, "checks_missing",
+                 f"{spice.CHECKS_FILENAME} не найден — тестбенч не "
+                 f"подключён к netlist, .meas выполнятся не будут")
+        return False
+    try:
+        net_text = net_path.read_text(encoding="utf-8")
+        checks_text = checks_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        gate.add(SEV_ERROR, "checks_inject_failed",
+                 f"не удалось вставить тестбенч {checks_path}: {exc}")
+        return False
+    try:
+        net_path.write_text(spice.inject_checks(net_text, checks_text),
+                            encoding="utf-8")
+    except OSError as exc:
+        gate.add(SEV_ERROR, "checks_inject_failed",
+                 f"не удалось перезаписать {net_path}: {exc}")
+        return False
+    return True
 
 
 def _ngspice_timeout_s() -> int:
@@ -522,7 +556,7 @@ def _simulate(gate: GateResult, net_path: Path,
     timeout = _ngspice_timeout_s()
     log_path = out_dir / "circuit.log"
     try:
-        spice.run_ngspice(net_path, out_dir / "circuit.raw", log_path, timeout)
+        spice.run_ngspice(net_path, log_path, timeout)
     except subprocess.TimeoutExpired as exc:
         gate.add(SEV_ERROR, "ngspice_timeout",
                  f"ngspice превысил таймаут {exc.timeout}s")

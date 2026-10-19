@@ -17,16 +17,32 @@ from .schemas import Check, ConfigError, DependencyError, ExpectConfig
 # Имя файла ожиданий рядом со схемой: <sch_dir>/bench/expect.yaml
 EXPECT_FILENAME = Path("bench") / "expect.yaml"
 
-# Строка вывода ngspice с результатом .meas: "vout_nom = 3.298000e+00"
+# Имя файла тестбенча (текст ngspice) рядом со схемой: <sch_dir>/bench/checks.spice
+CHECKS_FILENAME = Path("bench") / "checks.spice"
+
+# Строка вывода ngspice с результатом .meas (SPEC §4.1):
+#   vout_nom = 3.298000e+00
+#   vout_divider        =  2.500000e+00 at=  5.000000e+00
+# Хвост "at=/from=/to=" отбрасывается, имя нормализуется к нижнему регистру.
 _MEAS_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-    r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$"
+    r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"
+    r"(?:\s+(?:at|from|to)=\s*\S+.*)?\s*$"
 )
+
+# Директива конца netlist'а ngspice. ".ends" (конец subckt) намеренно не матчится.
+_END_RE = re.compile(r"^\s*\.end\s*$", re.IGNORECASE)
 
 
 def find_expect(sch_path: Path) -> Optional[Path]:
     """Найти bench/expect.yaml рядом со схемой; None, если тестбенча нет."""
     candidate = sch_path.parent / EXPECT_FILENAME
+    return candidate if candidate.is_file() else None
+
+
+def find_checks(sch_path: Path) -> Optional[Path]:
+    """Найти bench/checks.spice рядом со схемой; None, если файла нет."""
+    candidate = sch_path.parent / CHECKS_FILENAME
     return candidate if candidate.is_file() else None
 
 
@@ -65,15 +81,47 @@ def export_netlist(kicad_cli: str, sch_path: Path, out_net: Path) -> tuple[bool,
     return True, ""
 
 
-def run_ngspice(net_path: Path, raw_path: Path, log_path: Path,
+def inject_checks(net_text: str, checks_text: str) -> str:
+    """Вставить тестбенч (checks.spice) в netlist перед последней строкой .end.
+
+    Экспортёр KiCad завершает netlist директивой .end; всё, что идёт после неё,
+    ngspice игнорирует. Если .end нет — тестбенч добавляется в конец.
+    Пустой checks_text не меняет netlist.
+    """
+    block = checks_text.strip()
+    if not block:
+        return net_text
+    newline = "\r\n" if "\r\n" in net_text else "\n"
+    lines = net_text.split(newline)
+    idx = _last_end_line(lines)
+    insertion = block.splitlines()
+    if idx is None:
+        lines.extend(insertion)
+    else:
+        lines[idx:idx] = insertion
+    return newline.join(lines)
+
+
+def _last_end_line(lines: list[str]) -> Optional[int]:
+    """Индекс последней строки .end (None, если директивы нет)."""
+    for idx in range(len(lines) - 1, -1, -1):
+        if _END_RE.match(lines[idx]):
+            return idx
+    return None
+
+
+def run_ngspice(net_path: Path, log_path: Path,
                 timeout: int) -> tuple[int, str]:
     """Прогнать ngspice -b (§4.1). Возвращает (returncode, stderr).
+
+    Raw-файл (-r) не используется намеренно: в batch-режиме ngspice с -r
+    отказывается считать .meas ("No .measure possible in batch mode (-b)
+    with -r rawfile set!"), а гейту spice нужны именно результаты .meas.
 
     TimeoutExpired пробрасывается наверх — вызывающий превращает его
     в finding гейта spice.
     """
-    cmd = ["ngspice", "-b", "-r", str(raw_path), "-o", str(log_path),
-           str(net_path)]
+    cmd = ["ngspice", "-b", "-o", str(log_path), str(net_path)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout)

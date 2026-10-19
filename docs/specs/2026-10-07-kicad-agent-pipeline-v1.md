@@ -189,7 +189,7 @@ checks:
 
 | # | Гейт | Инструмент | Уровень |
 |---|---|---|---|
-| 1 | `parse` | `kicad-skip` + `kicad-happy/skills/kicad/analyze_schematic.py` | **hard** |
+| 1 | `parse` | `kicad-skip` + `kicad-happy/skills/kicad/scripts/analyze_schematic.py` | **hard** |
 | 2 | `lib-check` | сверка `block.yaml` из индекса: существует, порты совпадают с использованием | **hard** |
 | 3 | `erc` | `kicad-cli sch erc --format json --severity-error --severity-warning --exit-code-violations -o reports/erc.json <sch>` | **hard** по `error`, **soft** по `warning` |
 | 4 | `datasheet` | `kicad-happy/skills/datasheets` — MPN существует, V/I в допуске | soft |
@@ -205,8 +205,13 @@ kicad-cli sch erc --format json \
 
 # 5. SPICE
 kicad-cli sch export netlist --format spice -o reports/circuit.net design.kicad_sch
-ngspice -b -r reports/circuit.raw -o reports/circuit.log reports/circuit.net
+ngspice -b -o reports/circuit.log reports/circuit.net
 ```
+
+Перед запуском ngspice в нетлист вставляются проверки из `bench/checks.spice`
+(`.dc`, `.meas`, ...) — перед последней строкой `.end`. Флаг `-r` не
+используется: с ним ngspice не печатает результаты `.meas` в лог, а гейт
+читает значения именно из лога.
 
 ### 4.2 Обязательная настройка ERC
 

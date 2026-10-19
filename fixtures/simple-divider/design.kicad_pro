@@ -9,6 +9,11 @@
     },
     "layer_presets": []
   },
+  "erc": {
+    "rule_severities": {
+      "simulation_model_issue": "error"
+    }
+  },
   "meta": {
     "filename": "design.kicad_pro",
     "version": 1
