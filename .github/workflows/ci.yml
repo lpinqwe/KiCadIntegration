@@ -41,7 +41,13 @@ jobs:
       - name: Test simple-divider (expect 0)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
+            --entrypoint sh kicad-pipeline -c '
+              /usr/local/bin/verify --project /work/fixtures/simple-divider --out /tmp/reports --format both
+              code=$?
+              cat /tmp/reports/report.md 2>/dev/null
+              exit $code
+            ' > /tmp/report.md
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -52,7 +58,7 @@ jobs:
       - name: Test missing-power (expect 1)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/missing-power --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/missing-power --out /tmp/reports --format both
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 1 ]; then
@@ -63,7 +69,7 @@ jobs:
       - name: Test no-bench (expect 0)
         run: |
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/no-bench --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/no-bench --out /tmp/reports --format both
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -74,10 +80,10 @@ jobs:
       - name: Upload report summary
         if: always()
         run: |
-          if [ -f fixtures/simple-divider/reports/report.md ]; then
-            cat fixtures/simple-divider/reports/report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -s /tmp/report.md ]; then
+            cat /tmp/report.md >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "simple-divider report.md not found at fixtures/simple-divider/reports/report.md" >> "$GITHUB_STEP_SUMMARY"
+            echo "simple-divider report.md not generated" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   deep-sim:
@@ -101,4 +107,4 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run deep simulation
-        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --only spice --strict --format both
+        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --only spice --strict --out /tmp/reports --format both
