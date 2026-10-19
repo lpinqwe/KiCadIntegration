@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `5e89631` fix: missing-power на официальных lib_symbols KiCad 10 — грузится kicad-cli
+- `f966f70` fix: фикстуры под реальный контейнер — PWR_FLAG, checks.spice инжект, ngspice без -r, путь анализатора
+- `4743839` ci: отчёты в /tmp внутри контейнера — uid 1000 не пишет в checkout uid 1001
+- `4718721` ci: убрать глобальный HOME=/home/kicad — ломал buildx на раннере (EACCES)
+- `b20677b` docs: CHANGELOG — реальные хеши после пересборки истории
 - `e59b103` docs: CHANGELOG — фиксы по итогам ревью
 - `2d5f30f` docs: README, CHANGELOG по фактическим хешам, .gitignore += .env
 - `3b0ee6f` ci: пины зависимостей, кэш Docker, permissions: read, entrypoint
