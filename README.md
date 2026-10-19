@@ -13,7 +13,26 @@
 
 ## Запуск локально
 
-В окружении, где есть `docker` и доступ к образу `kicad/kicad:10.0`, можно запускать верификацию через контейнер.
+### Через docker compose (рекомендуется)
+
+Сборка и запуск гейтов на фикстуре (по умолчанию — `fixtures/simple-divider`):
+
+```bash
+docker compose -f pipeline/docker-compose.yml build
+docker compose -f pipeline/docker-compose.yml run verify
+```
+
+Свой проект — первым аргументом (PROJECT, путь относительно корня `/work`):
+
+```bash
+docker compose -f pipeline/docker-compose.yml run verify fixtures/missing-power
+docker compose -f pipeline/docker-compose.yml run verify fixtures/simple-divider --only parse
+```
+
+Сервисы: `verify` — гейты фазы 2, `sim` — глубокий прогон spice (фаза 3),
+`ci` — те же гейты с `--format both`. Каталог репозитория монтируется в `/work`.
+
+### Через docker run
 
 Сборка образа пайплайна:
 
@@ -21,20 +40,34 @@
 docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
 ```
 
-Проверка фикстуры:
+Проверка фикстуры (первый аргумент — PROJECT):
 
 ```bash
 docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
-  kicad-pipeline verify --project /work/fixtures/simple-divider --format both
+  kicad-pipeline fixtures/simple-divider --format both
 ```
-
-Результаты пишутся в `<project>/reports/` (`report.json`, `report.md`, а также артефакты гейтов вроде `sim.json`, `erc.json`, `analysis.json`).
 
 Проверить только SPICE-гейт с повышенной строгостью:
 
 ```bash
 docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
-  kicad-pipeline verify --project /work/fixtures/simple-divider --only spice --strict
+  kicad-pipeline fixtures/simple-divider --only spice --strict
+```
+
+### Локально без Docker
+
+В окружении с установленными `kicad-skip`, `PyYAML` (см. `pipeline/requirements.txt`):
+
+```bash
+python3 pipeline/verify/__main__.py --project fixtures/simple-divider --only parse
+```
+
+Результаты пишутся в `<project>/reports/` (`report.json`, `report.md`, а также артефакты гейтов вроде `sim.json`, `erc.json`, `analysis.json`).
+
+### Тесты
+
+```bash
+python3 -m pytest -q pipeline/tests
 ```
 
 ## Как добавить блок
