@@ -34,7 +34,7 @@ def _run_cli(project: Path, out: Path) -> subprocess.CompletedProcess:
 
 
 @pytest.mark.parametrize("fixture", ["simple-divider", "missing-power",
-                                     "no-bench"])
+                                     "no-bench", "bad-nominal"])
 def test_cli_only_parse_exit_zero(fixture: str, tmp_path: Path):
     proc = _run_cli(FIXTURES_DIR / fixture, tmp_path / fixture)
     assert proc.returncode == 0, proc.stderr

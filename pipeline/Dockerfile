@@ -1,4 +1,5 @@
-FROM kicad/kicad:10.0
+# Тег оставлен для читаемости; реальный пин — по digest (ревью 7а).
+FROM kicad/kicad:10.0@sha256:3224d1bf143185ecc1bd3a1082a36f37f0f4e59d707983a16515a845e3737fc6
 
 USER root
 

@@ -10,9 +10,9 @@ services:
       HOME: /home/kicad
     volumes:
       - ..:/work
-    # PROJECT — первый аргумент entrypoint'а; по умолчанию фикстура.
-    # Свой проект: docker compose run verify fixtures/missing-power
-    command: ["fixtures/simple-divider"]
+    # PROJECT — через --project (тот же стиль, что в README и CI); по умолчанию фикстура.
+    # Свой проект: docker compose run verify --project /work/fixtures/missing-power
+    command: ["verify", "--project", "/work/fixtures/simple-divider"]
 
   sim:
     build:
@@ -24,7 +24,7 @@ services:
     volumes:
       - ..:/work
     # TODO: фаза 3 — глубокий прогон (corner/Monte Carlo)
-    command: ["fixtures/simple-divider", "--only", "spice", "--strict"]
+    command: ["verify", "--project", "/work/fixtures/simple-divider", "--only", "spice", "--strict"]
 
   ci:
     build:
@@ -35,4 +35,4 @@ services:
       HOME: /home/kicad
     volumes:
       - ..:/work
-    command: ["fixtures/simple-divider", "--format", "both"]
+    command: ["verify", "--project", "/work/fixtures/simple-divider", "--format", "both"]

@@ -12,8 +12,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
 
 permissions:
   contents: read
@@ -23,13 +21,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # «30 passed» из локального прогона — самоотчёт; здесь тесты выполняются
+      # реально. Юнит-тестам Python достаточно (kicad-cli/ngspice не нужны:
+      # CLI-тесты гоняют --only parse), поэтому шаг идёт на хосте и ДО сборки
+      # образа: падение тестов видно сразу, без ожидания docker build.
+      # python3 + python3-venv входят в ubuntu-latest
+      # (runner-images: images/ubuntu/scripts/build/install-python.sh);
+      # venv обходит PEP 668 (externally-managed) и не пишет в системный Python.
+      - name: Run pytest (pipeline/tests)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pytest-venv"
+          "$RUNNER_TEMP/pytest-venv/bin/python" -m pip install -r pipeline/requirements.txt
+          "$RUNNER_TEMP/pytest-venv/bin/python" -m pytest -q pipeline/tests/
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build pipeline image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: pipeline
           file: pipeline/Dockerfile
@@ -40,42 +51,169 @@ jobs:
 
       - name: Test simple-divider (expect 0)
         run: |
+          # Общий каталог «контейнер ↔ хост»: контейнер пишет отчёты от uid 1000,
+          # каталог создаёт uid раннера — потому 0777 (иначе uid 1000 не сможет
+          # создать в нём каталог проекта).
+          mkdir -p /tmp/kicad-ci-reports
+          chmod 0777 /tmp/kicad-ci-reports
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
-            --entrypoint sh kicad-pipeline -c '
-              /usr/local/bin/verify --project /work/fixtures/simple-divider --out /tmp/reports --format both
-              code=$?
-              cat /tmp/reports/report.md 2>/dev/null
-              exit $code
-            ' > /tmp/report.md
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -v /tmp/kicad-ci-reports:/ci-reports \
+            -w /work -e HOME=/home/kicad --entrypoint sh kicad-pipeline -c '
+              set -e
+              mkdir -p /ci-reports/simple-divider
+              exec /usr/local/bin/verify --project /work/fixtures/simple-divider \
+                --out /ci-reports/simple-divider --format both \
+                > /ci-reports/simple-divider/verify-stdout.log
+            '
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 0 ]; then
-            echo "simple-divider: expected 0, got $EXIT_CODE"
+            echo "simple-divider: ожидался exit 0, получен $EXIT_CODE" >&2
             exit 1
           fi
+          # Разделение потоков: логи verify — в stderr (лог шага), stdout — в
+          # отдельный файл, отчёт — из каталога --out. Ничего не склеивается.
+          if [ -s /tmp/kicad-ci-reports/simple-divider/verify-stdout.log ]; then
+            echo "::warning::verify написал в stdout (по контракту он молчит):"
+            cat /tmp/kicad-ci-reports/simple-divider/verify-stdout.log
+          fi
+          cp /tmp/kicad-ci-reports/simple-divider/report.md /tmp/report.md
 
-      - name: Test missing-power (expect 1)
+      - name: Test missing-power (expect 1, упал именно erc)
         run: |
+          mkdir -p /tmp/kicad-ci-reports
+          chmod 0777 /tmp/kicad-ci-reports
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/missing-power --out /tmp/reports --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -v /tmp/kicad-ci-reports:/ci-reports \
+            -w /work -e HOME=/home/kicad --entrypoint sh kicad-pipeline -c '
+              set -e
+              mkdir -p /ci-reports/missing-power
+              exec /usr/local/bin/verify --project /work/fixtures/missing-power \
+                --out /ci-reports/missing-power --format both \
+                > /ci-reports/missing-power/verify-stdout.log
+            '
           EXIT_CODE=$?
           set -e
           if [ "$EXIT_CODE" -ne 1 ]; then
-            echo "missing-power: expected 1, got $EXIT_CODE"
+            echo "missing-power: ожидался exit 1, получен $EXIT_CODE" >&2
             exit 1
           fi
+          # Exit 1 сам по себе ничего не доказывает (провал парсинга дал бы тот же
+          # код): сверяем report.json — упал именно гейт erc и именно по
+          # power_pin_not_driven.
+          python3 - <<'PY'
+          import json
+          import sys
 
-      - name: Test no-bench (expect 0)
+          path = "/tmp/kicad-ci-reports/missing-power/report.json"
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  report = json.load(fh)
+          except (OSError, ValueError) as exc:
+              sys.exit(f"report.json недоступен ({path}): {exc}")
+
+          problems = []
+          if report.get("verdict") != "fail":
+              problems.append(
+                  f"verdict={report.get('verdict')!r}, ожидался 'fail'")
+          gates = report.get("gates") or {}
+
+          parse = gates.get("parse") or {}
+          if parse.get("status") != "pass":
+              problems.append(
+                  f"gates.parse.status={parse.get('status')!r} — падает не erc, "
+                  f"а парсинг схемы")
+
+          erc = gates.get("erc") or {}
+          if erc.get("status") != "fail":
+              problems.append(
+                  f"gates.erc.status={erc.get('status')!r}, ожидался 'fail'")
+          erc_types = [err.get("type") for err in erc.get("errors") or []]
+          if "power_pin_not_driven" not in erc_types:
+              problems.append(
+                  "gates.erc.errors не содержит power_pin_not_driven; "
+                  f"фактические типы: {erc_types}")
+
+          spice = gates.get("spice") or {}
+          if spice.get("status") == "fail":
+              problems.append(
+                  "gates.spice.status='fail' — в этом кейсе падать должен erc, "
+                  "а не spice")
+
+          if problems:
+              sys.exit("report.json (missing-power) — проверка НЕ пройдена:\n  - "
+                       + "\n  - ".join(problems))
+          print("report.json (missing-power) OK: verdict=fail, erc=fail, "
+                "power_pin_not_driven найден, spice не падал")
+          PY
+
+      - name: Test bad-nominal (expect 1, упал именно spice)
         run: |
+          # Негативный кейс гейта spice: делитель с R2=47k, ожидание 2.5V/tol 0.05
+          # не проходит → гейт spice обязан упасть (ERC при этом чистый).
+          mkdir -p /tmp/kicad-ci-reports
+          chmod 0777 /tmp/kicad-ci-reports
           set +e
-          docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/no-bench --out /tmp/reports --format both
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -v /tmp/kicad-ci-reports:/ci-reports \
+            -w /work -e HOME=/home/kicad --entrypoint sh kicad-pipeline -c '
+              set -e
+              mkdir -p /ci-reports/bad-nominal
+              exec /usr/local/bin/verify --project /work/fixtures/bad-nominal \
+                --out /ci-reports/bad-nominal --format both \
+                > /ci-reports/bad-nominal/verify-stdout.log
+            '
           EXIT_CODE=$?
           set -e
-          if [ "$EXIT_CODE" -ne 0 ]; then
-            echo "no-bench: expected 0, got $EXIT_CODE"
+          if [ "$EXIT_CODE" -ne 1 ]; then
+            echo "bad-nominal: ожидался exit 1, получен $EXIT_CODE" >&2
             exit 1
           fi
+          python3 - <<'PY'
+          import json
+          import sys
+
+          path = "/tmp/kicad-ci-reports/bad-nominal/report.json"
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  report = json.load(fh)
+          except (OSError, ValueError) as exc:
+              sys.exit(f"report.json недоступен ({path}): {exc}")
+
+          problems = []
+          if report.get("verdict") != "fail":
+              problems.append(
+                  f"verdict={report.get('verdict')!r}, ожидался 'fail'")
+          gates = report.get("gates") or {}
+
+          for name in ("parse", "lib-check", "erc"):
+              status = (gates.get(name) or {}).get("status")
+              if status not in ("pass", "skip"):
+                  problems.append(
+                      f"gates.{name}.status={status!r} — падает не spice, "
+                      f"гейт {name} обязан pass/skip")
+
+          spice = gates.get("spice") or {}
+          if spice.get("status") != "fail":
+              problems.append(
+                  f"gates.spice.status={spice.get('status')!r}, ожидался 'fail'")
+          spice_errors = spice.get("errors") or []
+          types = [err.get("type") for err in spice_errors]
+          if "check_failed" not in types:
+              problems.append(
+                  f"gates.spice.errors не содержит check_failed; "
+                  f"фактические типы: {types}")
+          if not any("vout_divider" in str(err.get("message", ""))
+                     for err in spice_errors):
+              problems.append(
+                  "ни одна ошибка spice не упоминает check vout_divider; "
+                  f"сообщения: {[err.get('message') for err in spice_errors]}")
+
+          if problems:
+              sys.exit("report.json (bad-nominal) — проверка НЕ пройдена:\n  - "
+                       + "\n  - ".join(problems))
+          print("report.json (bad-nominal) OK: verdict=fail, spice=fail, "
+                "check_failed по vout_divider, erc/parse не падали")
+          PY
 
       - name: Upload report summary
         if: always()
@@ -86,18 +224,23 @@ jobs:
             echo "simple-divider report.md not generated" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  deep-sim:
+  # Правило «блок библиотеки принимается только с bench» (README.md,
+  # library/README.md): каждый блок library/<domain>/<name>/ гоняется с
+  # verify --strict, поэтому spice: skip без bench/ падает.
+  # hashFiles вернёт '' при пустой библиотеке (сейчас только .gitkeep +
+  # README.md) → job пропускается, CI не падает.
+  library-strict:
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'sim-deep')
+    if: hashFiles('library/*/*/block.yaml') != ''
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build pipeline image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: pipeline
           file: pipeline/Dockerfile
@@ -106,5 +249,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run deep simulation
-        run: docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad kicad-pipeline /work/fixtures/simple-divider --only spice --strict --out /tmp/reports --format both
+      - name: Verify library blocks (--strict)
+        run: |
+          set -e
+          mkdir -p /tmp/kicad-ci-reports
+          chmod 0777 /tmp/kicad-ci-reports
+          # без nullglob несовпавший glob дал бы одно итерацию с литеральным
+          # шаблоном → docker run по несуществующему пути
+          shopt -s nullglob
+          for block in library/*/*/block.yaml; do
+            proj="$(dirname "$block")"
+            echo "::group::$proj"
+            set +e
+            docker run --rm -u 1000:1000 -v "$PWD:/work" -v /tmp/kicad-ci-reports:/ci-reports \
+              -w /work -e HOME=/home/kicad --entrypoint sh kicad-pipeline -c "
+                set -e
+                mkdir -p '/ci-reports/$proj'
+                exec /usr/local/bin/verify --project '/work/$proj' \
+                  --out '/ci-reports/$proj' --strict --format both
+              "
+            EXIT_CODE=$?
+            set -e
+            if [ "$EXIT_CODE" -ne 0 ]; then
+              echo "$proj: verify --strict -> exit $EXIT_CODE" >&2
+              exit 1
+            fi
+            echo "::endgroup::"
+          done

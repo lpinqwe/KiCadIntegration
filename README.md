@@ -7,7 +7,7 @@
 - **Только схемы и симуляции** (плата — v2). Фокус на сборке `.kicad_sch`, ERC, SPICE-верификации и единых гейтах для локального прогона агентом и CI.
 - **Каталог блоков** в `library/<domain>/<block-name>/` с контрактом `block.yaml`, тестбенчем `bench/` и регламентированным форматом артефактов.
 - **Единый код верификации** в `pipeline/verify/`. Гейты: `parse`, `lib-check`, `erc`, `datasheet`, `spice`.
-- **Контейнерный запуск**: образ `kicad/kicad:10.0` + Python-инструменты (`kicad-skip`, `kicad-happy`, `ngspice`).
+- **Контейнерный запуск**: образ `kicad/kicad:10.0` (закреплён по digest в `pipeline/Dockerfile`) + Python-инструменты (`kicad-skip`, `kicad-happy`, `ngspice`).
 
 Подробности см. в спецификации: [docs/specs/2026-10-07-kicad-agent-pipeline-v1.md](docs/specs/2026-10-07-kicad-agent-pipeline-v1.md).
 
@@ -22,11 +22,11 @@ docker compose -f pipeline/docker-compose.yml build
 docker compose -f pipeline/docker-compose.yml run verify
 ```
 
-Свой проект — первым аргументом (PROJECT, путь относительно корня `/work`):
+Свой проект — через явный `--project` (путь внутри контейнера, `/work` — корень репозитория):
 
 ```bash
-docker compose -f pipeline/docker-compose.yml run verify fixtures/missing-power
-docker compose -f pipeline/docker-compose.yml run verify fixtures/simple-divider --only parse
+docker compose -f pipeline/docker-compose.yml run verify --project /work/fixtures/missing-power
+docker compose -f pipeline/docker-compose.yml run verify --project /work/fixtures/simple-divider --only parse
 ```
 
 Сервисы: `verify` — гейты фазы 2, `sim` — глубокий прогон spice (фаза 3),
@@ -40,18 +40,18 @@ docker compose -f pipeline/docker-compose.yml run verify fixtures/simple-divider
 docker build -f pipeline/Dockerfile -t kicad-pipeline pipeline/
 ```
 
-Проверка фикстуры (первый аргумент — PROJECT):
+Проверка фикстуры. Единый стиль вызова — явный `verify --project <путь внутри контейнера>`:
 
 ```bash
 docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
-  kicad-pipeline fixtures/simple-divider --format both
+  kicad-pipeline verify --project /work/fixtures/simple-divider --format both
 ```
 
 Проверить только SPICE-гейт с повышенной строгостью:
 
 ```bash
 docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
-  kicad-pipeline fixtures/simple-divider --only spice --strict
+  kicad-pipeline verify --project /work/fixtures/simple-divider --only spice --strict
 ```
 
 ### Локально без Docker
@@ -79,5 +79,16 @@ python3 -m pytest -q pipeline/tests
 5. По желанию добавить `README.md` и `datasheets/`.
 6. Проверить локально через `verify` на тестбенче и прогнать регрессию существующих бенчей.
 7. Открыть PR. Первые ~10 блоков ревьюит человек; далее автопроверка по гейтам.
+
+### Правило `--strict` для блоков библиотеки
+
+Гейт `spice` без `bench/expect.yaml` даёт `status: skip` и exit 0 — это ок для регрессии фикстур («skip работает»), но **дыра для блоков каталога**: блок без теста прошёл бы CI.
+
+Правило: **блок библиотеки принимается только с `bench/`; в CI блоки прогоняются с `verify --strict`**, поэтому `spice: skip` (и любые warning'и/soft-гейты) становятся fail. Локально перед PR:
+
+```bash
+docker run --rm -u 1000:1000 -v "$PWD:/work" -w /work -e HOME=/home/kicad \
+  kicad-pipeline verify --project /work/library/<domain>/<block-name> --strict --format both
+```
 
 См. разделы 3.1–3.3 и 5.3 спецификации для форматов файлов.
