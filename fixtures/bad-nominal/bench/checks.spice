@@ -1,0 +1,7 @@
+* bench: тот же делитель, что и в simple-divider, но R2=47k вместо 10k
+* vout = 5 * 47k / (10k + 47k) = 4.12V — заведомо не 2.5V:
+* expect.yaml (expected 2.5, tol_abs 0.05) обязан не пройти → гейт spice = fail.
+* ERC остаётся чистым (PWR_FLAG на +5V и GND), чтобы падал именно spice.
+V1 +5V GND 5
+.dc V1 0 5 0.1
+.meas dc vout_divider MAX v(VOUT)

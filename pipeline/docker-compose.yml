@@ -1,0 +1,38 @@
+name: kicad-pipeline
+
+services:
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    environment:
+      HOME: /home/kicad
+    volumes:
+      - ..:/work
+    # PROJECT — через --project (тот же стиль, что в README и CI); по умолчанию фикстура.
+    # Свой проект: docker compose run verify --project /work/fixtures/missing-power
+    command: ["verify", "--project", "/work/fixtures/simple-divider"]
+
+  sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    environment:
+      HOME: /home/kicad
+    volumes:
+      - ..:/work
+    # TODO: фаза 3 — глубокий прогон (corner/Monte Carlo)
+    command: ["verify", "--project", "/work/fixtures/simple-divider", "--only", "spice", "--strict"]
+
+  ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    environment:
+      HOME: /home/kicad
+    volumes:
+      - ..:/work
+    command: ["verify", "--project", "/work/fixtures/simple-divider", "--format", "both"]
