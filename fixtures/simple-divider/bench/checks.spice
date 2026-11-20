@@ -1,0 +1,4 @@
+* bench: R1/R2 divider driven by ideal 5V source
+V1 +5V GND 5
+.dc V1 0 5 0.1
+.meas dc vout_divider MAX v(VOUT)

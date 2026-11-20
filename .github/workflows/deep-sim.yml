@@ -1,0 +1,49 @@
+name: Deep simulation
+
+# Триггер по метке вынесен из ci.yml: labeled/unlabeled в общем воркфлоу
+# перезапускали ВСЕ job'ы, поэтому их убрали — а deep-sim зависел от
+# contains(github.event.pull_request.labels.*.name, 'sim-deep') и постановка
+# метки ничего не запускала. Здесь триггер только labeled, условие job'а —
+# конкретно та метка, которая была поставлена.
+on:
+  pull_request:
+    types:
+      - labeled
+
+permissions:
+  contents: read
+
+jobs:
+  deep-sim:
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'sim-deep'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build pipeline image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: pipeline
+          file: pipeline/Dockerfile
+          tags: kicad-pipeline:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run deep simulation
+        run: |
+          mkdir -p /tmp/kicad-ci-reports
+          chmod 0777 /tmp/kicad-ci-reports
+          docker run --rm -u 1000:1000 -v "$PWD:/work" -v /tmp/kicad-ci-reports:/ci-reports \
+            -w /work -e HOME=/home/kicad --entrypoint sh kicad-pipeline -c '
+              set -e
+              mkdir -p /ci-reports/deep-sim
+              exec /usr/local/bin/verify --project /work/fixtures/simple-divider \
+                --only spice --strict \
+                --out /ci-reports/deep-sim --format both \
+                > /ci-reports/deep-sim/verify-stdout.log
+            '
